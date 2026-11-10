@@ -59,6 +59,27 @@
         </createTable>
     </changeSet>
 
+    <changeSet id="002a-migrate-posts-timestamp-to-created-at" author="theaprince001">
+        <preConditions onFail="MARK_RAN">
+            <and>
+                <tableExists tableName="posts"/>
+                <columnExists tableName="posts" columnName="timestamp"/>
+                <not>
+                    <columnExists tableName="posts" columnName="created_at"/>
+                </not>
+            </and>
+        </preConditions>
+        <addColumn tableName="posts">
+            <column name="created_at" type="DATETIME(6)"/>
+        </addColumn>
+        <sql>
+            UPDATE posts
+            SET created_at = COALESCE(`timestamp`, CURRENT_TIMESTAMP(6))
+            WHERE created_at IS NULL;
+        </sql>
+        <addNotNullConstraint tableName="posts" columnName="created_at" columnDataType="DATETIME(6)"/>
+    </changeSet>
+
     <changeSet id="002b-create-posts-reply-to-created-at-id-index" author="theprince001">
         <preConditions onFail="MARK_RAN">
             <not><indexExists tableName="posts" indexName="idx_posts_reply_to_created_at_id"/></not>
