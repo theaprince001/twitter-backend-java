@@ -5,102 +5,100 @@ Schema is managed by [Liquibase](https://www.liquibase.org/) via
 Hibernate runs with `ddl-auto=validate` — it never creates or modifies tables.
 **Only Liquibase changes the schema.**
 
+Liquibase applies pending changesets automatically when the application starts.
+No manual migration step is required for local development or production — the
+application applies migrations before Hibernate's `ddl-auto=validate` check runs.
+
 ## Local development
 
-Migrations run automatically when the app starts:
+Set up the environment file and start the database:
 
 ```bash
-# Start the database
-docker compose up db
+# 1. Copy the example environment file
+cp .env.example .env
 
-# Run the app — Liquibase applies pending changesets automatically
+# 2. Set nonempty values in .env for the required Compose variables
+#    (see docker-compose.base.yml for the full list):
+#    DB_NAME=twitter_clone
+#    DB_USER=moo_user
+#    DB_PASS=moo_pass
+#    DB_ROOT_PASS=root_pass
+
+# 3. Start the database
+docker compose up db
+```
+
+Then run the application. Liquibase applies pending changesets on startup:
+
+```bash
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 The dev profile reads the database URL from `${DB_NAME:twitter_clone}` and the
-root password from `${DB_ROOT_PASS:root_pass}`. The defaults match what
-`docker compose up db` creates, so no environment variables are required for
-the standard setup.
-
-To use a different database or password, export the matching variable before
-starting the app:
+root password from `${DB_ROOT_PASS:root_pass}`. If you set different values in
+`.env` for Compose, export the same values for the application so both connect
+to the same database:
 
 ```bash
 # bash / zsh
-export DB_NAME=moo
-export DB_ROOT_PASS=my_root_pass
+export DB_NAME=twitter_clone
+export DB_ROOT_PASS=root_pass
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 ```powershell
 # PowerShell (Windows)
-$env:DB_NAME="moo"
-$env:DB_ROOT_PASS="my_root_pass"
+$env:DB_NAME="twitter_clone"
+$env:DB_ROOT_PASS="root_pass"
 ./mvnw spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
-## Applying migrations manually
+## Upgrading an existing (pre-Liquibase) database
 
-Useful for CI pipelines, scripted deploys, or previewing changes before an
-app start:
+If a database was created by an older `ddl-auto=update` build that predates
+this Liquibase setup, the schema may not match what the changelog creates.
+The `posts.created_at` migration is provided in-place by three guarded
+changesets in `001-initial-schema.xml`:
 
-```bash
-./mvnw liquibase:update \
-  -Dliquibase.url="jdbc:mysql://localhost:3306/twitter_clone" \
-  -Dliquibase.username=root \
-  -Dliquibase.password=root_pass
+- `002a-add-posts-created-at-column` — adds `created_at` if it is missing
+- `002a-backfill-posts-created-at` — copies `timestamp` into `created_at`
+  when a legacy `timestamp` column is present
+- `002a-add-posts-created-at-not-null` — enforces `NOT NULL` once the column
+  is populated
 
-# Apply only the next N changesets (useful for staged rollouts)
-./mvnw liquibase:update-count -Dliquibase.count=1 \
-  -Dliquibase.url="jdbc:mysql://localhost:3306/twitter_clone" \
-  -Dliquibase.username=root \
-  -Dliquibase.password=root_pass
-```
-
-## Baselining an existing (pre-Liquibase) database
-
-If a database was created by an older `ddl-auto=update` version that predates
-this Liquibase setup, baseline it before running migrations. Baselining marks
-the existing changesets as already applied without executing them, so
-Liquibase knows where to start applying future changes.
+Each step is independently guarded, so a partial failure (e.g. the backfill
+fails due to a lock timeout) is retried on the next startup instead of being
+silently skipped. Just start the application against the legacy database:
 
 ```bash
-# Mark all existing changesets as already applied without executing them
-./mvnw liquibase:changelog-sync \
-  -Dliquibase.url="jdbc:mysql://localhost:3306/legacy_db" \
-  -Dliquibase.username=root \
-  -Dliquibase.password=root_pass
+./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-Prefer in-place migration: changesets `002a-add-posts-created-at-column`,
-`002a-backfill-posts-created-at`, and `002a-add-posts-created-at-not-null`
-provide a safe, retry-friendly migration path for older schemas that have
-`posts.timestamp` but not `posts.created_at`. If you prefer to baseline
-instead of migrate, run the backfill manually:
+Liquibase runs the three `002a-*` changesets in order, preserving existing
+`timestamp` data.
 
-```sql
-UPDATE posts SET created_at = `timestamp` WHERE created_at IS NULL;
-ALTER TABLE posts MODIFY created_at DATETIME(6) NOT NULL;
-```
+Do **not** run `liquibase:changelog-sync` against a legacy database without
+verifying that every changeset's schema change already exists. `changelog-sync`
+marks each changeset as applied without executing it — if an index or
+column from the changelog is missing on the legacy schema, that change is
+silently skipped and will never be applied on future startups.
 
 ## Production
 
-Production applies pending changesets on startup
-(`spring.liquibase.enabled=true`). For zero-downtime deployments, run
-migrations as a pre-deploy step before rolling out the new app version,
-so failures are caught before any new pods receive traffic:
+Production applies pending changesets on application startup
+(`spring.liquibase.enabled=true` in `application.properties`). The recommended
+deployment flow:
 
-```bash
-./mvnw liquibase:update \
-  -Dliquibase.url="${MYSQL_DB_URL}" \
-  -Dliquibase.username="${MYSQL_DB_UNAME}" \
-  -Dliquibase.password="${MYSQL_DB_PASSWD}"
-```
+1. Deploy the new application version.
+2. Liquibase runs before the app becomes ready. If a changeset fails, the app
+   does not start, and the previous version continues serving traffic.
+3. Verify `DATABASECHANGELOG` shows the expected changesets applied.
+4. For zero-downtime deployments, deploy to a single canary instance first,
+   verify the schema, then roll out the remaining instances.
 
-Then roll out the new app version. If a migration needs to be rolled back,
-use `liquibase:rollback -Dliquibase.rollbackCount=1` with the same connection
-parameters.
-
-See
-[`db.changelog-master.xml`](../src/main/resources/db/changelog/db.changelog-master.xml)
-for the ordered list of changesets.
+Rollback is **not a supported recovery path**. The current changelog does
+not define `<rollback>` blocks, so `liquibase:rollback` can only reverse
+changesets via Liquibase's auto-generated inverse operations — which for
+`010-create-refresh-tokens-table` means dropping the table and all stored
+refresh tokens. If a migration needs to be reversed, deploy a new
+forward-only changeset that compensates for the previous one.
