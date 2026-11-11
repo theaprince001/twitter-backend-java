@@ -110,12 +110,16 @@
             <and>
                 <tableExists tableName="posts"/>
                 <columnExists tableName="posts" columnName="created_at"/>
-                <sqlCheck expectedResult="1">
-                    SELECT COUNT(*) FROM information_schema.COLUMNS
-                    WHERE UPPER(TABLE_NAME) = 'POSTS'
-                    AND UPPER(COLUMN_NAME) = 'CREATED_AT'
-                    AND UPPER(IS_NULLABLE) = 'YES'
-                </sqlCheck>
+                <or>
+                    <dbms type="!mysql"/>
+                    <sqlCheck expectedResult="1">
+                        SELECT COUNT(*) FROM information_schema.COLUMNS
+                        WHERE UPPER(TABLE_NAME) = 'POSTS'
+                        AND UPPER(COLUMN_NAME) = 'CREATED_AT'
+                        AND UPPER(IS_NULLABLE) = 'YES'
+                        AND TABLE_SCHEMA = SCHEMA()
+                    </sqlCheck>
+                </or>
             </and>
         </preConditions>
         <addNotNullConstraint tableName="posts"
