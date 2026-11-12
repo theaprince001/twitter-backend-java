@@ -36,6 +36,9 @@ to be set (root `application.properties` uses `${JWT_SECRET}` with no default):
 
 ```bash
 # bash / zsh — use the values from your .env file
+# Use single quotes to preserve special characters (like $) in the password.
+# If your password contains a single quote, close the quote, insert an escaped 
+# quote, and open a new quote (e.g., 'can'\''t').
 export DB_NAME='<value of DB_NAME from .env>'
 export DB_ROOT_PASS='<value of DB_ROOT_PASS from .env>'
 export JWT_SECRET="$(openssl rand -hex 32)"
@@ -44,6 +47,8 @@ export JWT_SECRET="$(openssl rand -hex 32)"
 
 ```powershell
 # PowerShell (Windows) — use the values from your .env file
+# Use single quotes to preserve special characters (like $) in the password.
+# If your password contains a single quote, double it (e.g., 'can''t').
 $env:DB_NAME = '<value of DB_NAME from .env>'
 $env:DB_ROOT_PASS = '<value of DB_ROOT_PASS from .env>'
 $env:JWT_SECRET = '<at least 32 bytes of randomness>'
