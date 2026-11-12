@@ -19,10 +19,10 @@ cp .env.example .env
 
 # 2. Set nonempty values in .env for all required Compose variables
 #    (see docker-compose.base.yml for the full list):
-#    DB_NAME=twitter_clone
-#    DB_USER=moo_user
-#    DB_PASS=moo_pass
-#    DB_ROOT_PASS=root_pass
+#    DB_NAME=
+#    DB_USER=
+#    DB_PASS=
+#    DB_ROOT_PASS=
 #    JWT_SECRET=<at least 32 bytes of randomness>
 
 # 3. Start the database in detached mode so the command returns to the shell
@@ -35,76 +35,20 @@ root password from `${DB_ROOT_PASS:root_pass}`, and it requires `JWT_SECRET`
 to be set (root `application.properties` uses `${JWT_SECRET}` with no default):
 
 ```bash
-# bash / zsh
-export DB_NAME=twitter_clone
-export DB_ROOT_PASS=root_pass
-export JWT_SECRET="$(openssl rand -hex 32)"
-./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
-```
-
-```powershell
-# PowerShell (Windows)
-$env:DB_NAME="twitter_clone"
-$env:DB_ROOT_PASS="root_pass"
-$env:JWT_SECRET="<at least 32 bytes of randomness>"
-./mvnw spring-boot:run "-Dspring-boot.run.profiles=dev"
-```
-
-## Upgrading an existing (pre-Liquibase) database
-
-If a database was created by an older `ddl-auto=update` build that predates
-this Liquibase setup, the schema may not match what the changelog creates.
-Select the target database explicitly before starting the upgrade. The dev
-profile defaults to `twitter_clone` and enables `createDatabaseIfNotExist=true`,
-so a legacy setup that used a different name (for example `twitter`) would be
-silently ignored — the app would create a fresh empty `twitter_clone` and
-upgrade that, leaving the real legacy data untouched. Point the app at the
-existing database by exporting `DB_NAME` with the legacy name:
-
-```bash
 # bash / zsh — use the values from your .env file
-export DB_NAME="<DB_NAME from .env>"
-export DB_ROOT_PASS="<DB_ROOT_PASS from .env>"
+export DB_NAME="<value of DB_NAME from .env>"
+export DB_ROOT_PASS="<value of DB_ROOT_PASS from .env>"
 export JWT_SECRET="$(openssl rand -hex 32)"
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 ```powershell
 # PowerShell (Windows) — use the values from your .env file
-$env:DB_NAME = "<DB_NAME from .env>"
-$env:DB_ROOT_PASS = "<DB_ROOT_PASS from .env>"
+$env:DB_NAME = "<value of DB_NAME from .env>"
+$env:DB_ROOT_PASS = "<value of DB_ROOT_PASS from .env>"
 $env:JWT_SECRET = "<at least 32 bytes of randomness>"
 ./mvnw spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
-
-Before the migration runs, verify the startup log shows the intended database:
-
-```text
-Database JDBC URL [jdbc:mysql://localhost:3306/twitter?...]
-Default catalog/schema: twitter/undefined
-```
-
-If `Default catalog/schema` shows `twitter_clone` when you expected `twitter`,
-stop the app and re-check the exported `DB_NAME`.
-
-The `posts.created_at` migration is provided in-place by three guarded
-changesets in `001-initial-schema.xml`:
-
-- `002a-add-posts-created-at-column` — adds `created_at` if it is missing
-- `002a-backfill-posts-created-at` — copies `timestamp` into `created_at`
-  when a legacy `timestamp` column is present
-- `002a-add-posts-created-at-not-null` — enforces `NOT NULL` once the column
-  is populated
-
-Each step is independently guarded, so a partial failure (e.g. the backfill
-fails due to a lock timeout) is retried on the next startup instead of being
-silently skipped.
-
-Do **not** run `liquibase:changelog-sync` against a legacy database without
-verifying that every changeset's schema change already exists. `changelog-sync`
-marks each changeset as applied without executing it — if an index or
-column from the changelog is missing on the legacy schema, that change is
-silently skipped and will never be applied on future startups.
 
 ## Production
 
@@ -113,22 +57,9 @@ Production applies pending changesets on application startup
 when a migration fails depends on the deployment topology:
 
 - **Rolling / blue-green deployments** (two app instances, traffic routed
-  between them): the previous instance keeps serving reads while the new
-  instance applies migrations. If a migration fails, only the new instance
-  is affected.
-
-  **However**, the `002a-add-posts-created-at-not-null` changeset adds
-  `created_at` as `NOT NULL` without a default. Once applied, the **old
-  instance can no longer INSERT into `posts`** — MySQL's default strict
-  mode rejects inserts that omit a `NOT NULL` column with no default.
-  Before this migration runs in a two-instance setup, either:
-
-    - **Pause writes to `posts`** during the migration window, or
-    - **Stage the migration across two releases:** Release A ships with the
-      column nullable and dual-writes populated by both old and new
-      instances; Release B enforces `NOT NULL` once all writers populate it.
-
-  Blue-green alone is not sufficient for this changeset.
+  between them): the previous instance keeps serving traffic while the new
+  instance applies migrations. If a migration fails, only the new instance is
+  affected, and the old one continues serving.
 - **Single-container Compose** (this repository's default deployment):
   `docker compose up` stops and recreates the app container when its image
   changes. A migration failure at startup leaves no version serving traffic
