@@ -36,17 +36,17 @@ to be set (root `application.properties` uses `${JWT_SECRET}` with no default):
 
 ```bash
 # bash / zsh — use the values from your .env file
-export DB_NAME="<value of DB_NAME from .env>"
-export DB_ROOT_PASS="<value of DB_ROOT_PASS from .env>"
+export DB_NAME='<value of DB_NAME from .env>'
+export DB_ROOT_PASS='<value of DB_ROOT_PASS from .env>'
 export JWT_SECRET="$(openssl rand -hex 32)"
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 ```powershell
 # PowerShell (Windows) — use the values from your .env file
-$env:DB_NAME = "<value of DB_NAME from .env>"
-$env:DB_ROOT_PASS = "<value of DB_ROOT_PASS from .env>"
-$env:JWT_SECRET = "<at least 32 bytes of randomness>"
+$env:DB_NAME = '<value of DB_NAME from .env>'
+$env:DB_ROOT_PASS = '<value of DB_ROOT_PASS from .env>'
+$env:JWT_SECRET = '<at least 32 bytes of randomness>'
 ./mvnw spring-boot:run "-Dspring-boot.run.profiles=dev"
 ```
 
